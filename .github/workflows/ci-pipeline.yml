@@ -1,0 +1,208 @@
+name: Advanced CI Pipeline for ML System
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: '3.10'
+  MODEL_ACCURACY_THRESHOLD: 0.85
+  MODEL_PRECISION_THRESHOLD: 0.80
+  MODEL_RECALL_THRESHOLD: 0.80
+  MODEL_F1_THRESHOLD: 0.80
+
+jobs:
+  code-validation:
+    name: Code Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 mypy black pytest pytest-cov requests
+
+      - name: Run Flake8 Linting
+        run: |
+          flake8 src/ tests/ --max-line-length=100 --exclude=__pycache__
+        continue-on-error: false
+
+      - name: Run Black Format Check
+        run: |
+          black --check src/ tests/
+        continue-on-error: false
+
+      - name: Run MyPy Type Checking
+        run: |
+          mypy src/ --ignore-missing-imports
+        continue-on-error: false
+
+  dependency-installation:
+    name: Dependency Installation
+    runs-on: ubuntu-latest
+    needs: code-validation
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Project Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install scikit-learn pandas numpy joblib
+
+      - name: Verify Installation
+        run: |
+          python -c "import sklearn; import pandas; import numpy; import joblib; print('All dependencies installed successfully')"
+
+  unit-testing:
+    name: Unit Testing
+    runs-on: ubuntu-latest
+    needs: dependency-installation
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run Unit Tests
+        run: |
+          pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=term
+
+      - name: Upload Coverage Reports
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  api-testing:
+    name: API Testing
+    runs-on: ubuntu-latest
+    needs: dependency-installation
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest requests
+
+      - name: Train Model
+        run: |
+          python src/train.py
+
+      - name: Start API Server
+        run: |
+          python src/app.py &
+          sleep 10
+
+      - name: Run API Tests
+        run: |
+          pytest tests/api/ -v
+
+      - name: Stop API Server
+        if: always()
+        run: |
+          pkill -f "python src/app.py"
+
+  model-metric-validation:
+    name: Model Metric Validation
+    runs-on: ubuntu-latest
+    needs: dependency-installation
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install scikit-learn pandas numpy joblib
+
+      - name: Train Model
+        run: |
+          python src/train.py
+
+      - name: Validate Model Metrics
+        run: |
+          python src/validate_model.py --accuracy ${{ env.MODEL_ACCURACY_THRESHOLD }} \
+                                       --precision ${{ env.MODEL_PRECISION_THRESHOLD }} \
+                                       --recall ${{ env.MODEL_RECALL_THRESHOLD }} \
+                                       --f1 ${{ env.MODEL_F1_THRESHOLD }}
+
+  docker-build:
+    name: Docker Image Build
+    runs-on: ubuntu-latest
+    needs: [unit-testing, api-testing, model-metric-validation]
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        run: |
+          docker build -t ml-pipeline:latest .
+
+      - name: Test Docker Image
+        run: |
+          docker run --rm ml-pipeline:latest python -c "import sklearn; print('Docker image validated')"
+
+      - name: Save Docker Image
+        run: |
+          docker save ml-pipeline:latest -o ml-pipeline-image.tar
+
+      - name: Upload Docker Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: ml-pipeline-image.tar
+          retention-days: 7
