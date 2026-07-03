@@ -1,6 +1,4 @@
- """
-Unit tests for model training module.
-"""
+"""Unit tests for model training module."""
 
 import pytest
 import numpy as np
