@@ -1,4 +1,4 @@
-"""
+ """
 Unit tests for model training module.
 """
 
@@ -24,23 +24,23 @@ def test_imports():
 def test_model_training():
     """Test that model training produces valid output."""
     from train import train_model
-    
+
     # Train model
     metrics = train_model()
-    
+
     # Check that metrics are returned
     assert isinstance(metrics, dict)
     assert 'accuracy' in metrics
     assert 'precision' in metrics
     assert 'recall' in metrics
     assert 'f1' in metrics
-    
+
     # Check that metrics are in valid range
     assert 0 <= metrics['accuracy'] <= 1
     assert 0 <= metrics['precision'] <= 1
     assert 0 <= metrics['recall'] <= 1
     assert 0 <= metrics['f1'] <= 1
-    
+
     # Check that model file is created
     assert os.path.exists('../models/model.joblib')
     assert os.path.exists('../models/metrics.joblib')
@@ -59,7 +59,7 @@ def test_metrics_file_exists():
 def test_model_loading():
     """Test that trained model can be loaded."""
     import joblib
-    
+
     model = joblib.load('../models/model.joblib')
     assert model is not None
     assert hasattr(model, 'predict')
